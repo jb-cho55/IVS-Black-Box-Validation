@@ -1,0 +1,33 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+  
+}
+
+variables
+{
+  message IVS_01_10ms IVS_01_10ms_msg;
+  msTimer IVS_01_10ms_timer;
+  
+}
+
+on timer IVS_01_10ms_timer{
+  IVS_01_10ms_msg.Brake_Pedal_Press= @sysvar::IVS::Brake_Pedal_Press;
+  output(IVS_01_10ms_msg);
+}
+
+on start
+{
+  
+}
+
+on sysvar IVS::IVS_01_10ms_en{
+  if(@this){
+    setTimerCyclic(IVS_01_10ms_timer,
+                  @sysvar::IVS::IVS_01_10ms_period,
+                  @sysvar::IVS::IVS_01_10ms_period);
+  }
+  else{
+    cancelTimer(IVS_01_10ms_timer);
+  }
+}
