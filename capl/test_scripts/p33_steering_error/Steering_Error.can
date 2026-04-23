@@ -1,0 +1,680 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+}
+
+variables
+{
+  msTimer t_1ms;
+
+  message Fault_sts_Rsp  faultRsp_msg;
+  message BATT_01_10ms   battRef_msg;
+  message IGN_01_2ms     ignRef_msg;
+  message Fault_sts_Req  faultReq_msg;
+  message STR_01_10ms    strReq_msg;
+  
+  
+  int i;
+  int j;
+
+  int time_cnt_ms = 0;
+  int flag = 0;
+  int Ign_switch_cnt = 0;
+}
+
+void initializeSysVar()
+{
+  @sysvar::Sensors::Batt_Chg_Sts   = 0;
+  @sysvar::Sensors::Batt_Percent   = 0;
+  @sysvar::Sensors::Batt_Voltage   = 0;
+
+  @sysvar::Sensors::Ignition_sts   = 0;
+  @sysvar::Sensors::Engine_sts     = 0;
+  @sysvar::Sensors::Steering_angle = 0;
+
+  @sysvar::Sensors::Brake_press    = 0;
+  @sysvar::Sensors::ACCEL_press    = 0;
+  @sysvar::Sensors::Vehicle_Speed  = 0;
+
+  @sysvar::UDS::All_Fault_sts_request    = 1;
+  @sysvar::UDS::All_Fault_clr_request    = 0;
+  @sysvar::UDS::Software_Version_Request = 0;
+
+  flag = 0;
+  time_cnt_ms = 0;
+  Ign_switch_cnt = 0;
+  
+  cancelTimer(t_1ms);
+}
+
+
+void clearAllFaults()
+{
+    @sysvar::UDS::All_Fault_clr_request = 1;
+    while(1){
+        @sysvar::UDS::Send_msg = 1;
+        if (TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+        {
+            TestGetWaitEventMsgData(faultRsp_msg);
+            if(faultRsp_msg.BATT_Chg_Err_sts ==0){
+                break;
+            }
+        }
+    }
+    testWaitForTimeout(10);
+    @sysvar::UDS::All_Fault_clr_request = 0;
+}
+
+
+void waitBattReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(battRef_msg);
+    if (battRef_msg.Batt_Percent == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(battRef_msg);
+              if (battRef_msg.Batt_Percent == data){
+
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void waitBattChgReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(battRef_msg);
+    if (battRef_msg.Batt_Chg_Sts == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(battRef_msg);
+              if (battRef_msg.Batt_Chg_Sts == data){
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void waitIGNReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(IGN_01_2ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(ignRef_msg);
+    if(ignRef_msg.Ignition_sts == data){
+      if(ignRef_msg.Ignition_sts == 0) Ign_switch_cnt++;
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(IGN_01_2ms, timeoutMs) == 1)
+        {
+          TestGetWaitEventMsgData(ignRef_msg);
+          if(ignRef_msg.Ignition_sts == data){
+            if(ignRef_msg.Ignition_sts == 0) Ign_switch_cnt++;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+void waitStrReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(STR_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(strReq_msg);
+    if (strReq_msg.Steering_angle == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(STR_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(strReq_msg);
+              if (strReq_msg.Steering_angle == data){
+
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+
+
+
+void startIvsRecoveryTimer()
+{
+  cancelTimer(t_1ms);
+  time_cnt_ms = 0;
+  testWaitForTimeout(9);   /* IVS controller 보정값 */
+  setTimerCyclic(t_1ms, 1);
+}
+
+on timer t_1ms
+{
+  time_cnt_ms += 1;
+}
+
+
+testcase tc_PreCondition_Detection()
+{
+  int steering_angle_arr[15] = {-2048,-2047,-1000,-721,-720,-719,-360,0, 360, 719,720,721,1000,2046,2047};
+  int steering_angle;
+  int idx;
+  
+  int faultDetectedInWindow;
+  int unexpectedStateDetected;
+  int timingError;
+  int expectFault;
+  
+  for (idx=0; idx<elCount(steering_angle_arr); idx++)
+  {
+    steering_angle = steering_angle_arr[idx];
+    
+    for(i = 0; i <= 1; i++)
+    {
+      for(j = 0; j <= 1; j++)
+      {
+        clearAllFaults();
+        cancelTimer(t_1ms);
+        initializeSysVar();
+
+        @sysvar::Sensors::Ignition_sts = i;
+        @sysvar::Sensors::Engine_sts   = j;
+
+        @sysvar::Sensors::Steering_angle = steering_angle;
+
+        faultDetectedInWindow = 0;
+        unexpectedStateDetected = 0;
+        timingError = 0;
+
+        /* Batt_Pecent >=80 IGN=1 + ENG=1 일 때만 fault level 2 기대 */
+        expectFault = (i == 1 && j == 1 && ((steering_angle > 720) || (steering_angle < -720)));
+        
+        cancelTimer(t_1ms);
+        
+        time_cnt_ms = 0;
+        @sysvar::Sensors::Batt_Chg_Sts = 1;
+        waitStrReference(20,steering_angle);
+        startIvsRecoveryTimer();
+        while(time_cnt_ms <= 5100)
+        {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(expectFault)
+            {
+              if(faultRsp_msg.Steering_Err_sts == 2)
+              {
+                if(time_cnt_ms >= 40 && time_cnt_ms <= 60)
+                {
+                  faultDetectedInWindow = 1;
+                  break;
+                }
+                else
+                {
+                  timingError = 1;
+                  TestStepFail("1.4",
+                               "Fault detected out of time window when IGN=%d, ENG=%d, Steering_Angle=%d, time=%dms",
+                               i, j, steering_angle, time_cnt_ms);
+                  break;
+                }
+              }
+            }
+            else
+            {
+              /* fault를 기대하지 않는 모든 경우는 0 유지가 정상 */
+              if(faultRsp_msg.Steering_Err_sts != 0)
+              {
+                unexpectedStateDetected = 1;
+                TestStepFail("1.5",
+                             "Unexpected state detected when IGN=%d, ENG=%d, Steering_Angle=%d, Err_sts=%d, time=%dms",
+                             i, j, steering_angle, faultRsp_msg.Steering_Err_sts, time_cnt_ms);
+                break;
+              }
+            }
+          }
+        }
+
+        cancelTimer(t_1ms);
+
+        if(expectFault)
+        {
+          if(faultDetectedInWindow == 1)
+          {
+            TestStepPass("1.2",
+                         "Expected fault detected in 40~60ms when IGN=%d, ENG=%d, Steering_Angle=%d",
+                         i, j, steering_angle);
+          }
+          else if(timingError == 0)
+          {
+            TestStepFail("1.1",
+                         "Fault not detected in 40~60ms when IGN=%d, ENG=%d, Steering_Angle=%d",
+                         i, j, steering_angle);
+          }
+        }
+        else
+        {
+          if(unexpectedStateDetected == 0)
+          {
+            TestStepPass("1.3",
+                         "Err_sts remained 0 as expected when IGN=%d, ENG=%d, Steering_Angle=%d",
+                         i, j, steering_angle);
+          }
+        }
+      }
+    }
+  }
+}
+
+testcase tc_Recovery()
+{
+  int steering_angle_arr[15] = {-2048,-2047,-1000,-721,-720,-719,-360,0, 360, 719,720,721,1000,2046,2047};
+  int steering_angle;
+  int idx;
+
+  int preCondOk;
+  int recoveryDetectedInWindow;
+  int unexpectedRecoveryDetected;
+  int timingError;
+  int expectRecovery;
+
+  int count =0;
+  
+  for(idx=0; idx<elCount(steering_angle_arr); idx++)
+  {
+    steering_angle = steering_angle_arr[idx];
+    for(i=0; i<=1; i++){
+      for(j=0; j<=1; j++){
+        
+        initializeSysVar();
+        clearAllFaults();
+        count++;
+        
+        preCondOk = 0;
+        recoveryDetectedInWindow = 0;
+        unexpectedRecoveryDetected = 0;
+        timingError = 0;
+
+        /* 1) 먼저 fault level 2 precondition 만들기 */
+        @sysvar::Sensors::Ignition_sts = 1;
+        @sysvar::Sensors::Engine_sts   = 1;
+        
+        @sysvar::Sensors::Steering_angle = 721;
+  
+        while(1)
+        {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(faultRsp_msg.Steering_Err_sts == 2)
+            {
+
+                preCondOk = 1;
+                break;
+            }
+          }
+        }
+        
+
+
+        /* 2) recovery 조건으로 변경 */
+        @sysvar::Sensors::Ignition_sts = i;
+        @sysvar::Sensors::Engine_sts   = j;
+        @sysvar::Sensors::Steering_angle = steering_angle;
+        
+        waitStrReference(20,steering_angle);
+        startIvsRecoveryTimer();
+        /* IGN=1, ENG=1, Batt_Percent>=80 일 때만 recovery 기대 */
+        expectRecovery = (i == 1 && j == 1 && steering_angle <= 720 && steering_angle >= -720);
+  
+        while(time_cnt_ms <= 5010)
+        {
+          @sysvar::UDS::Send_msg = 1;
+
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(faultRsp_msg.Steering_Err_sts == 1)
+            {
+              if(expectRecovery)
+              {
+                if(time_cnt_ms >= 90 && time_cnt_ms <= 110)
+                {
+                  recoveryDetectedInWindow = 1;
+                  break;
+                }
+                else
+                {
+                  timingError = 1;
+                  TestStepFail("2.4",
+                               "Recovery timing error when IGN=%d, ENG=%d, Steering_angle=%d, time=%dms",
+                               i, j, steering_angle, time_cnt_ms);
+                  break;
+                }
+              }
+              else
+              {
+                unexpectedRecoveryDetected = 1;
+                TestStepFail("2.2",
+                             "Unexpected recovery detected when IGN=%d, ENG=%d, Steering_angle=%d, time=%dms",
+                             i, j, steering_angle, time_cnt_ms);
+                break;
+              }
+            }
+          }
+        }
+
+        /* 3) 기대값 판정 */
+        if(expectRecovery)
+        {
+          if(recoveryDetectedInWindow == 1)
+          {
+            TestStepPass("2.3",
+                         "Recovery detected as expected when IGN=%d, ENG=%d, Steering_angle=%d, time=%dms",
+                         i, j, steering_angle,time_cnt_ms);
+          }
+          else if(timingError == 0)
+          {
+            TestStepFail("2.5",
+                         "Recovery failed when IGN=%d, ENG=%d, Steering_angle=%d",
+                         i, j, steering_angle);
+          }
+        }
+        else
+        {
+          if(unexpectedRecoveryDetected == 0)
+          {
+            TestStepPass("2.6",
+                         "No recovery as expected when IGN=%d, ENG=%d, Steering_angle=%d",
+                         i, j, steering_angle);
+          }
+        }
+      }
+    }
+  }
+}
+
+testcase tc_Recovery_From_NonFaultLevel2()
+{
+
+  int preCondOk;
+  int unexpectedRecovery;
+  int timingError;
+  
+  int steering_angle_arr[15] = {-2048,-2047,-1000,-721,-720,-719,-360,0, 360, 719,720,721,1000,2046,2047};
+  int steering_angle;
+  int idx;
+
+
+  for (idx=0; idx<elCount(steering_angle_arr); idx++)  {
+    steering_angle  = steering_angle_arr[idx];
+    for(i = 0; i <= 1; i++)
+    {
+      for(j = 0; j <= 1; j++)
+      {
+        initializeSysVar();
+        clearAllFaults();
+        cancelTimer(t_1ms);
+
+        preCondOk = 0;
+        unexpectedRecovery = 0;
+        timingError = 0;
+
+        /* 1) 시작 상태가 Fault level 2가 아님을 확인 */
+        @sysvar::Sensors::Ignition_sts = 1;
+        @sysvar::Sensors::Engine_sts   = 1;
+
+        @sysvar::Sensors::Steering_angle = 400;
+        waitStrReference(20,400);
+        startIvsRecoveryTimer();
+        while(time_cnt_ms <= 200)
+        {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(faultRsp_msg.BATT_Vol_Err_sts != 2)
+            {
+              preCondOk = 1;
+              break;
+            }
+          }
+        }
+
+        if(preCondOk == 0)
+        {
+          TestStepFail("3.0",
+                       "Precondition failed: Fault level is still 2 before test (IGN=%d, ENG=%d, steering_angle=%d)",
+                       i, j, steering_angle);
+          continue;
+        }
+
+        /* 2) recovery 조건처럼 보이는 입력 적용 */
+        cancelTimer(t_1ms);
+
+        @sysvar::Sensors::Ignition_sts = i;
+        @sysvar::Sensors::Engine_sts   = j;
+        @sysvar::Sensors::Steering_angle = steering_angle;
+        waitStrReference(20,steering_angle);
+        startIvsRecoveryTimer();
+        
+        while(time_cnt_ms <= 110)
+        {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(faultRsp_msg.Steering_Err_sts == 1)
+            {
+              if(time_cnt_ms >= 90 && time_cnt_ms <= 110)
+              {
+                unexpectedRecovery = 1;
+                break;
+              }
+              else
+              {
+                timingError = 1;
+                TestStepFail("3.4",
+                             "Unexpected recovery timing when IGN=%d, ENG=%d, steering_angle=%d, time=%dms",
+                             i, j, steering_angle, time_cnt_ms);
+                break;
+              }
+            }
+          }
+        }
+
+        /* 3) 기대값 판정: non-level-2에서는 모두 recovery되면 안 됨 */
+        if(unexpectedRecovery == 0 && timingError == 0)
+        {
+          TestStepPass("3.1",
+                       "No recovery as expected from non-level-2 state when IGN=%d, ENG=%d, steering_angle=%d",
+                       i, j, steering_angle);
+        }
+        else if(unexpectedRecovery == 1)
+        {
+          TestStepFail("3.2",
+                       "Unexpected recovery detected from non-level-2 state when IGN=%d, ENG=%d, battVoltage=%d",
+                       i, j, steering_angle);
+        }
+      }
+    }
+  }
+}
+
+
+testcase tc_Clear_From_Level1()
+{
+  int preFaultOk;
+  int preRecoveryOk;
+  int clearAtExpectedCycle;
+  int clearAtUnexpectedCycle;
+
+
+  int steering_angle;
+  
+  for(steering_angle =-720; steering_angle <=720; steering_angle+=10){
+      
+      initializeSysVar();
+      clearAllFaults();
+      
+    
+      preFaultOk = 0;
+      preRecoveryOk = 0;
+      clearAtExpectedCycle = 0;
+      clearAtUnexpectedCycle = 0;
+    
+      /* 1) 먼저 Fault level 2 만들기 */
+      @sysvar::Sensors::Ignition_sts = 1;
+      @sysvar::Sensors::Engine_sts   = 1;
+      @sysvar::Sensors::Steering_angle = 1000;
+    
+      waitStrReference(20, 1000);
+    
+      while(1)
+      {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+      
+            if(faultRsp_msg.Steering_Err_sts == 2)
+            {
+                preFaultOk = 1;
+                break;
+            } 
+          }
+      }
+    
+      if(preFaultOk == 0)
+      {
+        TestStepFail("4.0", "Precondition fail: level 2 not reached");
+        return;
+      }
+    
+      /* 2) Recovery시켜서 Fault level 1 만들기 */
+      @sysvar::Sensors::Steering_angle = steering_angle;
+      
+      
+      cancelTimer(t_1ms);
+      time_cnt_ms = 0;
+      flag = 0;
+    
+      waitStrReference(20, steering_angle);
+
+      while(1)
+      {
+        @sysvar::UDS::Send_msg =1;
+        if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+        {
+          TestGetWaitEventMsgData(faultRsp_msg);
+    
+          if(faultRsp_msg.Steering_Err_sts == 1)
+            {
+              preRecoveryOk = 1;
+              break;
+            }
+          }
+      }
+      
+      
+      if(preRecoveryOk == 0)
+      {
+        TestStepFail("4.0", "Precondition fail: level 1 not reached");
+        return;
+      }
+    
+      /* 3) Clear 검사 시작 전에 cycle counter만 리셋 */
+      Ign_switch_cnt = 0;
+      flag = i;
+      
+      
+      while(1)
+      {
+        if(Ign_switch_cnt > 100)
+        {
+          break;
+        }
+        
+        if(@sysvar::Sensors::Ignition_sts == 0)
+        {
+          @sysvar::Sensors::Ignition_sts = 1;
+          waitIGNReference(10, 1);
+        }
+        else
+        {
+          @sysvar::Sensors::Ignition_sts = 0;
+          waitIGNReference(10, 0);
+        }
+        @sysvar::UDS::Send_msg =1;
+        if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+        {
+          TestGetWaitEventMsgData(faultRsp_msg);
+    
+          if(faultRsp_msg.Steering_Err_sts == 0)
+          {
+            if(Ign_switch_cnt == 50 && i == 1)
+            {
+              clearAtExpectedCycle = 1;
+              break;
+            }
+            else
+            {
+              clearAtUnexpectedCycle = 1;
+              break;
+            }
+            
+          }
+        }
+      }
+    
+      if(clearAtExpectedCycle == 1)
+      {
+        TestStepPass("4.1",
+                     "Clear Pass: level 1 became 0 at expected cycle count, Cycle_cnt=%d, steering_angle=%d",
+                     Ign_switch_cnt,steering_angle);
+      }
+      else if(clearAtUnexpectedCycle == 1)
+      {
+        TestStepFail("4.2",
+                     "Unexpected clear: level 1 became 0 at wrong cycle count, Cycle_cnt=%d, steering_angle=%d",
+                     Ign_switch_cnt,steering_angle);
+      }
+      else
+      {
+        TestStepFail("4.3",
+                     "Clear Fail: level 1 did not become 0 until max cycle count, Cycle_cnt=%d, steering_angle=%d",
+                     Ign_switch_cnt,steering_angle);
+      }    
+    }
+}
+
+
+void MainTest()
+{
+  //tc_PreCondition_Detection();
+  //tc_Recovery();
+  //tc_Recovery_From_NonFaultLevel2();
+  tc_Clear_From_Level1();
+  //tc_NoClear_From_Level2();
+  //tc_NoClear_From_Level1();
+}
