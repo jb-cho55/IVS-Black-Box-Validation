@@ -1,0 +1,25 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+  
+}
+
+variables
+{
+  message STR_01_10ms msg;
+  msTimer t_10ms;
+}
+
+on start{
+  msg.Steering_angle = 0;
+  setTimerCyclic(t_10ms,10);
+}
+
+on timer t_10ms{
+  output(msg);
+}
+
+on sysvar Sensors::Steering_angle{
+  msg.Steering_angle = @this;
+}
+
