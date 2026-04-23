@@ -1,0 +1,37 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+  
+}
+
+variables
+{
+  msTimer t_10ms;
+  message BRK_01_10ms msg;
+}
+
+on start{
+  msg.Brake_press = 0;
+  msg.ACCEL_press = 0;
+  msg.Vehicle_Speed = 0;
+  
+  setTimerCyclic(t_10ms , 10);
+}
+
+on timer t_10ms{
+  output(msg);
+}
+
+on sysvar Sensors::Brake_press{
+    msg.Brake_press = @this;
+}
+
+on sysvar Sensors::ACCEL_press{
+  msg.ACCEL_press = @this;
+}
+
+on sysvar Sensors::Vehicle_Speed{
+  msg.Vehicle_Speed = @this;
+}
+
+
