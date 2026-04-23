@@ -1,0 +1,309 @@
+﻿/*@!Encoding:65001*/
+includes
+{
+}
+
+variables
+{
+  msTimer t_1ms;
+
+  message Fault_sts_Rsp  faultRsp_msg;
+  message BATT_01_10ms   battRef_msg;
+  message IGN_01_2ms     ignRef_msg;
+  message Fault_sts_Req  faultReq_msg;
+  message ENG_02_10ms    engRef_msg;
+  
+  int i;
+  int j;
+
+  int time_cnt_ms = 0;
+  int flag = 0;
+  int Ign_switch_cnt = 0;
+}
+
+void initializeSysVar()
+{
+  @sysvar::Sensors::Batt_Chg_Sts   = 0;
+  @sysvar::Sensors::Batt_Percent   = 0;
+  @sysvar::Sensors::Batt_Voltage   = 0;
+
+  @sysvar::Sensors::Ignition_sts   = 0;
+  @sysvar::Sensors::Engine_sts     = 0;
+  @sysvar::Sensors::Steering_angle = 0;
+
+  @sysvar::Sensors::Brake_press    = 0;
+  @sysvar::Sensors::ACCEL_press    = 0;
+  @sysvar::Sensors::Vehicle_Speed  = 0;
+
+  @sysvar::UDS::All_Fault_sts_request    = 1;
+  @sysvar::UDS::All_Fault_clr_request    = 0;
+  @sysvar::UDS::Software_Version_Request = 0;
+
+  flag = 0;
+  time_cnt_ms = 0;
+  Ign_switch_cnt = 0;
+  
+  cancelTimer(t_1ms);
+}
+
+
+void clearAllFaults()
+{
+    @sysvar::UDS::All_Fault_clr_request = 1;
+    while(1){
+        @sysvar::UDS::Send_msg = 1;
+        if (TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+        {
+            TestGetWaitEventMsgData(faultRsp_msg);
+            if(faultRsp_msg.IGN_Err_sts ==0){
+                break;
+            }
+        }
+    }
+    testWaitForTimeout(10);
+    @sysvar::UDS::All_Fault_clr_request = 0;
+}
+
+
+void waitBattReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(battRef_msg);
+    if (battRef_msg.Batt_Percent == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(battRef_msg);
+              if (battRef_msg.Batt_Percent == data){
+
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void waitBattChgReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(battRef_msg);
+    if (battRef_msg.Batt_Chg_Sts == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(battRef_msg);
+              if (battRef_msg.Batt_Chg_Sts == data){
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void waitBattVoltageReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(battRef_msg);
+    if (battRef_msg.Batt_Voltage == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(BATT_01_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(battRef_msg);
+              if (battRef_msg.Batt_Voltage == data){
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void waitIGNReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(IGN_01_2ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(ignRef_msg);
+    if(ignRef_msg.Ignition_sts == data){
+      if(ignRef_msg.Ignition_sts == 0) Ign_switch_cnt++;
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(IGN_01_2ms, timeoutMs) == 1)
+        {
+          TestGetWaitEventMsgData(ignRef_msg);
+          if(ignRef_msg.Ignition_sts == data){
+            if(ignRef_msg.Ignition_sts == 0) Ign_switch_cnt++;
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+
+void waitEngineReference(int timeoutMs , int data)
+{
+  if (TestWaitForMessage(ENG_02_10ms, timeoutMs) == 1)
+  {
+    TestGetWaitEventMsgData(engRef_msg);
+    if (engRef_msg.Engine_sts == data){
+    }
+    else{
+      while(1){
+        if (TestWaitForMessage(ENG_02_10ms, timeoutMs) == 1){
+              TestGetWaitEventMsgData(engRef_msg);
+              if (engRef_msg.Engine_sts == data){
+
+                break;
+              }
+        }
+      }
+    }
+  }
+}
+
+void startIvsRecoveryTimer()
+{
+  cancelTimer(t_1ms);
+  time_cnt_ms = 0;
+  testWaitForTimeout(9);   /* IVS controller 보정값 */
+  setTimerCyclic(t_1ms, 1);
+}
+
+on timer t_1ms
+{
+  time_cnt_ms += 1;
+}
+
+
+
+testcase tc_PreCondition_Detection()
+{
+  int battPercent_arr[13] = {0,1,25,39,40,41,60,79,80,81,90,99,100};
+  int battPercent;
+  int idx;
+  
+  int faultDetectedInWindow;
+  int unexpectedStateDetected;
+  int timingError;
+  int expectFault;
+  
+  for (battPercent=40; battPercent<=80; battPercent++)
+  {
+    //battPercent = battPercent_arr[idx];z
+    for(i = 0; i <= 3; i++)
+    {
+      for(j = 0; j <= 1; j++)
+      {
+        initializeSysVar();
+        clearAllFaults();
+
+        @sysvar::Sensors::Ignition_sts = i;
+        @sysvar::Sensors::Engine_sts   = j;
+
+        @sysvar::Sensors::Batt_Percent = battPercent;
+        @sysvar::Sensors::Batt_Chg_Sts = 0;
+        @sysvar::Sensors::Batt_Voltage = 0;
+
+        faultDetectedInWindow = 0;
+        unexpectedStateDetected = 0;
+        timingError = 0;
+
+        /* Batt_Pecent >=80 IGN=1 + ENG=1 일 때만 fault level 2 기대 */
+        expectFault = (i == 3 && j == 1 && battPercent >= 40 && battPercent <=80);
+        waitEngineReference(20,j);
+        waitBattReference(20, battPercent);
+        waitIGNReference(20,i);
+        startIvsRecoveryTimer();
+        while(time_cnt_ms <= 5100)
+        {
+          @sysvar::UDS::Send_msg = 1;
+          if(TestWaitForMessage(Fault_sts_Rsp, 20) == 1)
+          {
+            TestGetWaitEventMsgData(faultRsp_msg);
+
+            if(expectFault)
+            {
+              if(faultRsp_msg.IGN_Err_sts == 2)
+              {
+                if(time_cnt_ms >=90 && time_cnt_ms <= 110)
+                {
+                  faultDetectedInWindow = 1;
+                  break;
+                }
+                else
+                {
+                  timingError = 1;
+                  TestStepFail("1.4",
+                               "Fault detected out of time window when IGN=%d, ENG=%d, battPercent=%d, time=%dms, Err_sts=%d",
+                               i, j, battPercent, time_cnt_ms,faultRsp_msg.IGN_Err_sts);
+                  break;
+                }
+              }
+            }
+            else
+            {
+              /* fault를 기대하지 않는 모든 경우는 0 유지가 정상 */
+              if(faultRsp_msg.IGN_Err_sts != 0)
+              {
+                unexpectedStateDetected = 1;
+                TestStepFail("1.5",
+                             "Unexpected state detected when IGN=%d, ENG=%d, battPercent=%d, Err_sts=%d, time=%dms",
+                             i, j, battPercent, faultRsp_msg.IGN_Err_sts, time_cnt_ms);
+                break;
+              }
+            }
+          }
+        }
+
+        cancelTimer(t_1ms);
+
+        if(expectFault)
+        {
+          if(faultDetectedInWindow == 1)
+          {
+            TestStepPass("1.2",
+                         "Expected fault detected in 90~110ms when IGN=%d, ENG=%d, battPercent=%d, time=%d , Err_sts=%d ",
+                         i, j, battPercent,time_cnt_ms,faultRsp_msg.IGN_Err_sts);
+          }
+          else if(timingError == 0)
+          {
+            TestStepFail("1.1",
+                         "Fault not detected in 90~110ms when IGN=%d, ENG=%d, battPercent=%d, time=%d, Err_sts=%d",
+                         i, j, battPercent,time_cnt_ms,faultRsp_msg.IGN_Err_sts);
+          }
+        }
+        else
+        {
+          if(unexpectedStateDetected == 0)
+          {
+            TestStepPass("1.3",
+                         "Err_sts remained 0 as expected when IGN=%d, ENG=%d, battPercent=%d",
+                         i, j, battPercent);
+          }
+        }
+      }
+    }
+  }
+}
+
+
+void MainTest()
+{
+  tc_PreCondition_Detection();
+  //tc_PreCondition_Detection_500ms();
+  //tc_Recovery();
+  //tc_Recovery_From_NonFaultLevel2();
+  //tc_Clear_From_Level1();
+  //tc_Clear_From_Level1_engine_off();
+  //tc_Clear_From_Level2();
+}
